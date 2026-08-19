@@ -52,43 +52,52 @@ function escapeHtml(str = '') {
 }
 
 // ---- KeyCRM payload parsing --------------------------------------------
-// NOTE: KeyCRM's exact webhook JSON shape can vary slightly by event/version.
-// This pulls known field names defensively and falls back gracefully.
-// If your test webhook payload uses different field names, adjust the
-// `extractCard` function below to match — the raw payload is always logged.
+// Real shape confirmed from KeyCRM docs (help.keycrm.app): triggers fire via
+// "Тригерна автоматизація" and the "Відправити Webhook" action. The card
+// event is always:
+//   { "event": "lead.change_lead_status", "context": { ...card fields } }
+// Since the trigger itself is configured in KeyCRM to fire only on
+// "Картка створена у воронці" (see README), every request that reaches this
+// endpoint already represents a card creation for the pipeline you picked
+// there — no need to guess from the payload.
+//
+// context does NOT include contact name/phone directly, only contact_id.
+// To show a name/phone you'd need an extra KeyCRM API call to
+// GET /contacts/{contact_id} with your KeyCRM API key — not wired up yet,
+// ask if you want that added.
 
 function extractCard(body) {
-  // KeyCRM commonly wraps the card under `card`, `data`, or sends it flat.
-  const card = body.card || body.data || body;
+  const card = body.context || body;
 
   return {
-    id: card.id ?? card.card_id ?? null,
-    title: card.title ?? card.name ?? '(без названия)',
-    pipelineId: card.pipeline_id ?? card.pipeline?.id ?? card.funnel_id ?? null,
-    pipelineName: card.pipeline?.name ?? card.pipeline_name ?? null,
-    statusName: card.status?.name ?? card.status_name ?? null,
-    managerName: card.manager?.name ?? card.assigned_to?.name ?? null,
-    contactName: card.contact?.full_name ?? card.client?.full_name ?? card.contact_name ?? null,
-    contactPhone: card.contact?.phone ?? card.client?.phone ?? card.phone ?? null,
-    value: card.value ?? card.amount ?? null,
-    source: card.source?.name ?? card.source_name ?? null,
-    comment: card.comment ?? card.note ?? card.description ?? null,
+    id: card.id ?? null,
+    title: card.title ?? '(без назви)',
+    pipelineId: card.pipeline_id ?? null,
+    contactId: card.contact_id ?? null,
+    managerId: card.manager_id ?? null,
+    sourceId: card.source_id ?? null,
+    statusId: card.status_id ?? null,
+    comment: card.manager_comment || null,
+    utmSource: card.utm_source || null,
+    utmCampaign: card.utm_campaign || null,
+    paymentsTotal: card.payments_total ?? null,
+    productsTotal: card.products_total ?? null,
+    createdAt: card.created_at ?? null,
     url: card.id ? `https://app.keycrm.app/pipelines/card/${card.id}` : null,
   };
 }
 
-function formatMessage(card, event) {
+function formatMessage(card) {
   const lines = [
-    `🆕 <b>Новая карточка в KeyCRM</b>`,
-    card.pipelineName ? `Воронка: ${escapeHtml(card.pipelineName)}` : null,
-    `Название: ${escapeHtml(card.title)}`,
-    card.contactName ? `Клиент: ${escapeHtml(card.contactName)}` : null,
-    card.contactPhone ? `Телефон: ${escapeHtml(card.contactPhone)}` : null,
-    card.value ? `Сумма: ${escapeHtml(card.value)}` : null,
-    card.source ? `Источник: ${escapeHtml(card.source)}` : null,
-    card.managerName ? `Менеджер: ${escapeHtml(card.managerName)}` : null,
-    card.comment ? `Комментарий: ${escapeHtml(card.comment)}` : null,
-    card.url ? `<a href="${card.url}">Открыть карточку</a>` : null,
+    `🆕 <b>Нова картка в KeyCRM</b>`,
+    `Назва: ${escapeHtml(card.title)}`,
+    card.contactId ? `Контакт ID: ${escapeHtml(card.contactId)}` : null,
+    card.managerId ? `Менеджер ID: ${escapeHtml(card.managerId)}` : null,
+    card.sourceId ? `Джерело ID: ${escapeHtml(card.sourceId)}` : null,
+    card.productsTotal ? `Сума товарів: ${escapeHtml(card.productsTotal)}` : null,
+    card.comment ? `Коментар: ${escapeHtml(card.comment)}` : null,
+    card.utmSource ? `UTM source: ${escapeHtml(card.utmSource)}` : null,
+    card.url ? `<a href="${card.url}">Відкрити картку</a>` : null,
   ].filter(Boolean);
 
   return lines.join('\n');
@@ -112,23 +121,26 @@ app.post('/webhook/keycrm', async (req, res) => {
   const body = req.body || {};
   console.log('Incoming KeyCRM webhook:', JSON.stringify(body));
 
-  const event = body.event || body.type || 'unknown';
+  const event = body.event || 'unknown';
 
-  // Only react to card-created events. KeyCRM's event name for this has
-  // varied across versions/docs — accept a few likely spellings.
-  const isCardCreated = /card.*creat|creat.*card|pipeline_card\.created/i.test(event);
-  if (!isCardCreated) {
-    return res.status(200).send('ignored: not a card-created event');
+  // KeyCRM sends "lead.change_lead_status" for pipeline cards. The trigger
+  // on the KeyCRM side is configured to fire only on card creation for the
+  // watched pipeline (see README) — this check is just a sanity filter in
+  // case the endpoint ever receives something unrelated.
+  if (event !== 'lead.change_lead_status') {
+    return res.status(200).send('ignored: unexpected event type');
   }
 
   const card = extractCard(body);
 
+  // Extra safety net: also filter by pipeline here, in case the KeyCRM
+  // trigger condition ever gets edited to include other pipelines.
   if (PIPELINE_ID && String(card.pipelineId) !== String(PIPELINE_ID)) {
     console.log(`Ignored card ${card.id}: pipeline ${card.pipelineId} != watched ${PIPELINE_ID}`);
     return res.status(200).send('ignored: different pipeline');
   }
 
-  const message = formatMessage(card, event);
+  const message = formatMessage(card);
   await sendTelegramMessage(message);
 
   res.status(200).send('ok');
