@@ -24,6 +24,30 @@ if (!TELEGRAM_CHAT_ID) {
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
+// source_id -> человекочитаемое название источника (из KeyCRM)
+const SOURCE_NAMES = {
+  1: 'Тік ток',
+  2: 'OLX',
+  3: 'Рекомендация',
+  4: 'Вх звонок',
+  5: 'Сайт Sindtex',
+  6: 'Prom.ua',
+  7: 'Telegram',
+  8: 'Instagram',
+  9: 'Facebook',
+  10: 'Viber',
+  11: 'Вх звонок OLX',
+  12: 'Вх звонок PROM',
+  13: 'Вх звонок TIKTOK',
+  14: 'Вх звонок INSTA',
+  15: 'TG leopard3',
+  16: 'TG sealion05',
+  17: 'TG sealion06',
+  18: 'TG sealion07ev',
+  19: 'TG songl',
+  20: 'TG ADS',
+};
+
 // ---- Telegram helper -------------------------------------------------
 
 async function sendTelegramMessage(text) {
@@ -93,7 +117,7 @@ function formatMessage(card) {
     `Назва: ${escapeHtml(card.title)}`,
     card.contactId ? `Контакт ID: ${escapeHtml(card.contactId)}` : null,
     card.managerId ? `Менеджер ID: ${escapeHtml(card.managerId)}` : null,
-    card.sourceId ? `Джерело ID: ${escapeHtml(card.sourceId)}` : null,
+    card.sourceId ? `Джерело: ${escapeHtml(SOURCE_NAMES[card.sourceId] || `невідоме (id ${card.sourceId})`)}` : null,
     card.productsTotal ? `Сума товарів: ${escapeHtml(card.productsTotal)}` : null,
     card.comment ? `Коментар: ${escapeHtml(card.comment)}` : null,
     card.utmSource ? `UTM source: ${escapeHtml(card.utmSource)}` : null,
